@@ -1,7 +1,9 @@
 import os
-import cv2
 import json
+import time
 from datetime import datetime
+
+import cv2
 from ultralytics import YOLO
 
 
@@ -9,87 +11,62 @@ from ultralytics import YOLO
 # PROJECT PATHS
 # ============================================================
 
-BASE_DIR = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
-)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-VIDEO_FOLDER = os.path.join(
-    BASE_DIR,
-    "videos"
-)
+VIDEOS_DIR = os.path.join(PROJECT_ROOT, "videos")
+JSON_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "json_output")
 
-OUTPUT_FOLDER = os.path.join(
-    BASE_DIR,
-    "json_output"
-)
+MODEL_PATH = os.path.join(PROJECT_ROOT, "yolo11n.pt")
 
-DETECTION_FOLDER = os.path.join(
-    BASE_DIR,
-    "runs",
-    "detect"
-)
+FASTAPI_URL = "http://127.0.0.1:8000/detection"
 
 
 # ============================================================
-# CREATE REQUIRED FOLDERS
+# CREATE REQUIRED DIRECTORIES
 # ============================================================
 
-os.makedirs(VIDEO_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-os.makedirs(DETECTION_FOLDER, exist_ok=True)
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+os.makedirs(JSON_OUTPUT_DIR, exist_ok=True)
 
 
 # ============================================================
-# YOLO MODEL
+# LOAD YOLO MODEL
 # ============================================================
-
-MODEL_NAME = "yolo11n.pt"
 
 print("\nLoading YOLO model...")
 
-model = YOLO(MODEL_NAME)
+model = YOLO(MODEL_PATH)
 
 print("YOLO model loaded successfully.")
 
 
 # ============================================================
-# DISPLAY TITLE
+# GLOBAL SELECTED VIDEO
 # ============================================================
 
-def display_title():
-
-    print("\n" + "=" * 70)
-    print("                 YOLO VIDEO DETECTION SYSTEM")
-    print("=" * 70)
+selected_video = None
 
 
 # ============================================================
-# GET AVAILABLE VIDEOS
+# GET ALL VIDEOS
 # ============================================================
 
-def get_videos():
-
-    if not os.path.exists(VIDEO_FOLDER):
-        return []
+def get_video_files():
 
     supported_extensions = (
         ".mp4",
         ".avi",
         ".mov",
-        ".mkv"
+        ".mkv",
     )
 
     videos = []
 
-    for file_name in os.listdir(VIDEO_FOLDER):
+    for filename in os.listdir(VIDEOS_DIR):
 
-        if file_name.lower().endswith(
-            supported_extensions
-        ):
+        if filename.lower().endswith(supported_extensions):
 
-            videos.append(file_name)
+            videos.append(filename)
 
     videos.sort()
 
@@ -102,183 +79,121 @@ def get_videos():
 
 def select_video():
 
-    videos = get_videos()
+    global selected_video
+
+    videos = get_video_files()
 
     if not videos:
 
-        print("\nNo videos found inside the videos folder.")
+        print("\nNo videos found in videos folder.")
 
-        return None
+        return
 
-    print("\nAvailable Videos")
-    print("-" * 45)
+    print("\n" + "=" * 70)
+    print("                         AVAILABLE VIDEOS")
+    print("=" * 70)
 
-    for index, video in enumerate(
-        videos,
-        start=1
-    ):
+    for index, video in enumerate(videos, start=1):
 
         print(f"{index}. {video}")
 
-    print("0. Back")
+    print("=" * 70)
 
     while True:
 
-        choice = input(
-            "\nSelect video: "
-        ).strip()
+        try:
 
-        if choice == "0":
-
-            return None
-
-        if not choice.isdigit():
-
-            print(
-                "Please enter a valid number."
+            choice = int(
+                input("Enter video number: ")
             )
 
-            continue
+            if 1 <= choice <= len(videos):
 
-        choice = int(choice)
+                selected_video = videos[choice - 1]
 
-        if 1 <= choice <= len(videos):
+                print(
+                    f"\nSelected Video : {selected_video}"
+                )
 
-            selected_video = os.path.join(
-                VIDEO_FOLDER,
-                videos[choice - 1]
-            )
+                break
 
-            print(
-                f"\nSelected video: "
-                f"{videos[choice - 1]}"
-            )
+            else:
 
-            return selected_video
+                print("Invalid choice.")
 
-        print(
-            "Invalid selection."
-        )
+        except ValueError:
+
+            print("Please enter a number.")
+
+
+# ============================================================
+# GET VIDEO PATH
+# ============================================================
+
+def get_selected_video_path():
+
+    if selected_video is None:
+
+        print("\nPlease select a video first.")
+
+        return None
+
+    return os.path.join(
+        VIDEOS_DIR,
+        selected_video
+    )
 
 
 # ============================================================
 # VIEW VIDEO
 # ============================================================
 
-def view_video(
-    video_path,
-    window_title="Video"
-):
-
-    if video_path is None:
-
-        print(
-            "\nPlease select a video first."
-        )
-
-        return
+def view_video(video_path, window_title):
 
     if not os.path.exists(video_path):
 
-        print(
-            "\nVideo file does not exist."
-        )
+        print("\nVideo file not found.")
 
         return
 
-    print("\nOpening video...")
-    print("Press Q to close the video.")
-
-    cap = cv2.VideoCapture(
-        video_path
-    )
+    cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
 
-        print(
-            "\nUnable to open video."
-        )
+        print("\nUnable to open video.")
 
         return
 
-    # --------------------------------------------------------
-    # GET ORIGINAL VIDEO DIMENSIONS
-    # --------------------------------------------------------
-
-    video_width = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_WIDTH
-        )
+    width = int(
+        cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     )
 
-    video_height = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_HEIGHT
-        )
+    height = int(
+        cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     )
 
-    # --------------------------------------------------------
-    # CREATE RESIZABLE WINDOW
-    # --------------------------------------------------------
+    max_width = 1200
+    max_height = 700
+
+    scale = min(
+        max_width / width,
+        max_height / height,
+        1
+    )
+
+    display_width = int(width * scale)
+    display_height = int(height * scale)
 
     cv2.namedWindow(
         window_title,
         cv2.WINDOW_NORMAL
     )
 
-    # --------------------------------------------------------
-    # MAXIMUM DISPLAY SIZE
-    # --------------------------------------------------------
-
-    max_width = 1200
-    max_height = 700
-
-    # Prevent division by zero
-    if video_width <= 0:
-        video_width = 640
-
-    if video_height <= 0:
-        video_height = 480
-
-    # --------------------------------------------------------
-    # CALCULATE SCALE
-    # --------------------------------------------------------
-
-    scale_width = (
-        max_width / video_width
-    )
-
-    scale_height = (
-        max_height / video_height
-    )
-
-    scale = min(
-        scale_width,
-        scale_height,
-        1
-    )
-
-    display_width = int(
-        video_width * scale
-    )
-
-    display_height = int(
-        video_height * scale
-    )
-
-    # --------------------------------------------------------
-    # SET WINDOW SIZE
-    # --------------------------------------------------------
-
     cv2.resizeWindow(
         window_title,
         display_width,
         display_height
     )
-
-    # --------------------------------------------------------
-    # PLAY VIDEO
-    # --------------------------------------------------------
 
     while True:
 
@@ -288,7 +203,6 @@ def view_video(
 
             break
 
-        # Resize only when necessary
         if scale < 1:
 
             frame = cv2.resize(
@@ -296,8 +210,7 @@ def view_video(
                 (
                     display_width,
                     display_height
-                ),
-                interpolation=cv2.INTER_AREA
+                )
             )
 
         cv2.imshow(
@@ -305,28 +218,39 @@ def view_video(
             frame
         )
 
-        # ----------------------------------------------------
-        # Q = EXIT VIDEO
-        # ----------------------------------------------------
+        key = cv2.waitKey(30) & 0xFF
 
-        if (
-            cv2.waitKey(25) & 0xFF
-            == ord("q")
-        ):
+        if key == ord("q"):
 
             break
 
-    # --------------------------------------------------------
-    # CLEANUP
-    # --------------------------------------------------------
-
     cap.release()
 
-    cv2.destroyWindow(
-        window_title
+    cv2.destroyAllWindows()
+
+
+# ============================================================
+# VIEW ORIGINAL VIDEO
+# ============================================================
+
+def view_original_video():
+
+    video_path = get_selected_video_path()
+
+    if video_path is None:
+
+        return
+
+    print(
+        f"\nOpening original video: {selected_video}"
     )
 
-    cv2.waitKey(1)
+    print("Press Q to close the video.")
+
+    view_video(
+        video_path,
+        "Original Video"
+    )
 
 
 # ============================================================
@@ -335,53 +259,23 @@ def view_video(
 
 def run_yolo_detection(video_path):
 
-    if video_path is None:
-
-        print(
-            "\nPlease select a video first."
-        )
-
-        return None
-
     if not os.path.exists(video_path):
 
         print(
-            "\nVideo file does not exist."
+            f"\nVideo not found: {video_path}"
         )
 
         return None
 
-    video_name = os.path.basename(
-        video_path
-    )
-
     print("\n" + "=" * 70)
-
-    print(
-        "                 RUNNING YOLO DETECTION"
-    )
-
+    print("                    YOLO DETECTION")
     print("=" * 70)
 
     print(
-        f"\nInput video : {video_name}"
+        f"\nProcessing: {os.path.basename(video_path)}"
     )
 
-    print(
-        "Model       : YOLO11n"
-    )
-
-    print(
-        "Device      : CPU"
-    )
-
-    print(
-        "\nProcessing video..."
-    )
-
-    print(
-        "Please wait...\n"
-    )
+    start_time = time.time()
 
     try:
 
@@ -391,115 +285,92 @@ def run_yolo_detection(video_path):
             verbose=True
         )
 
+        elapsed = time.time() - start_time
+
         print("\n" + "=" * 70)
-
-        print(
-            "              YOLO DETECTION COMPLETED"
-        )
-
+        print("                 YOLO DETECTION COMPLETE")
         print("=" * 70)
 
-        output_video = (
-            get_latest_detection_video()
+        print(
+            f"\nProcessing Time: {elapsed:.2f} seconds"
         )
 
-        if output_video:
-
-            print(
-                "\nOutput video:"
-            )
-
-            print(
-                output_video
-            )
+        print(
+            "\nYOLO detection output has been generated."
+        )
 
         return results
 
     except Exception as error:
 
         print(
-            "\nYOLO detection failed."
-        )
-
-        print(
-            f"Error: {error}"
+            f"\nYOLO detection failed:\n{error}"
         )
 
         return None
 
 
 # ============================================================
-# FIND LATEST DETECTION VIDEO
+# FIND LATEST YOLO OUTPUT
 # ============================================================
 
-def get_latest_detection_video():
+def find_latest_detection_output(video_filename):
 
-    if not os.path.exists(
-        DETECTION_FOLDER
-    ):
+    runs_dir = os.path.join(
+        PROJECT_ROOT,
+        "runs",
+        "detect"
+    )
+
+    if not os.path.exists(runs_dir):
 
         return None
 
-    prediction_folders = []
+    folders = []
 
-    for folder in os.listdir(
-        DETECTION_FOLDER
-    ):
+    for folder in os.listdir(runs_dir):
 
         folder_path = os.path.join(
-            DETECTION_FOLDER,
+            runs_dir,
             folder
         )
 
-        if os.path.isdir(
-            folder_path
-        ):
+        if os.path.isdir(folder_path):
 
-            prediction_folders.append(
-                folder_path
-            )
+            folders.append(folder_path)
 
-    if not prediction_folders:
+    if not folders:
 
         return None
 
-    latest_folder = max(
-        prediction_folders,
-        key=os.path.getmtime
+    folders.sort(
+        key=os.path.getmtime,
+        reverse=True
     )
 
-    supported_extensions = (
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv"
-    )
+    video_base_name = os.path.splitext(
+        video_filename
+    )[0]
 
-    video_files = []
+    for folder in folders:
 
-    for file_name in os.listdir(
-        latest_folder
-    ):
+        possible_files = [
+            f"{video_base_name}.avi",
+            f"{video_base_name}.mp4"
+        ]
 
-        if file_name.lower().endswith(
-            supported_extensions
-        ):
+        for filename in possible_files:
 
-            video_files.append(
-                os.path.join(
-                    latest_folder,
-                    file_name
-                )
+            output_path = os.path.join(
+                folder,
+                filename
             )
 
-    if not video_files:
+            if os.path.exists(output_path):
 
-        return None
+                return output_path
 
-    return max(
-        video_files,
-        key=os.path.getmtime
-    )
+    return None
 
 
 # ============================================================
@@ -508,14 +379,20 @@ def get_latest_detection_video():
 
 def view_detection_output():
 
-    output_video = (
-        get_latest_detection_video()
+    if selected_video is None:
+
+        print("\nPlease select a video first.")
+
+        return
+
+    output_path = find_latest_detection_output(
+        selected_video
     )
 
-    if output_video is None:
+    if output_path is None:
 
         print(
-            "\nNo detection output found."
+            "\nDetection output not found."
         )
 
         print(
@@ -525,15 +402,15 @@ def view_detection_output():
         return
 
     print(
-        "\nDetection Output:"
+        f"\nDetection Output:\n{output_path}"
     )
 
     print(
-        output_video
+        "\nPress Q to close the video."
     )
 
     view_video(
-        output_video,
+        output_path,
         "YOLO Detection Output"
     )
 
@@ -544,391 +421,366 @@ def view_detection_output():
 
 def generate_detection_json(video_path):
 
-    if video_path is None:
-
-        print(
-            "\nPlease select a video first."
-        )
-
-        return None
-
     if not os.path.exists(video_path):
 
         print(
-            "\nVideo file does not exist."
+            f"\nVideo not found: {video_path}"
         )
 
         return None
 
-    video_name = os.path.basename(
+    video_filename = os.path.basename(
         video_path
     )
 
     print("\n" + "=" * 70)
-
-    print(
-        "              GENERATING DETECTION JSON"
-    )
-
+    print("                  GENERATING DETECTION JSON")
     print("=" * 70)
 
     print(
-        f"\nVideo: {video_name}"
+        f"\nVideo: {video_filename}"
     )
 
-    print(
-        "\nRunning YOLO frame-by-frame..."
-    )
+    cap = cv2.VideoCapture(video_path)
 
-    print(
-        "Please wait...\n"
-    )
-
-    try:
-
-        # ----------------------------------------------------
-        # OPEN VIDEO
-        # ----------------------------------------------------
-
-        cap = cv2.VideoCapture(
-            video_path
-        )
-
-        if not cap.isOpened():
-
-            print(
-                "Unable to open video."
-            )
-
-            return None
-
-        total_frames = int(
-            cap.get(
-                cv2.CAP_PROP_FRAME_COUNT
-            )
-        )
-
-        fps = cap.get(
-            cv2.CAP_PROP_FPS
-        )
-
-        width = int(
-            cap.get(
-                cv2.CAP_PROP_FRAME_WIDTH
-            )
-        )
-
-        height = int(
-            cap.get(
-                cv2.CAP_PROP_FRAME_HEIGHT
-            )
-        )
-
-        # ----------------------------------------------------
-        # JSON STRUCTURE
-        # ----------------------------------------------------
-
-        detection_data = {
-
-            "video_name":
-                video_name,
-
-            "video_path":
-                video_path,
-
-            "total_frames":
-                total_frames,
-
-            "fps":
-                fps,
-
-            "width":
-                width,
-
-            "height":
-                height,
-
-            "generated_at":
-                datetime.now().isoformat(),
-
-            "detections":
-                []
-        }
-
-        # ----------------------------------------------------
-        # PROCESS EVERY FRAME
-        # ----------------------------------------------------
-
-        frame_number = 0
-
-        while True:
-
-            ret, frame = cap.read()
-
-            if not ret:
-
-                break
-
-            frame_number += 1
-
-            results = model.predict(
-                source=frame,
-                verbose=False
-            )
-
-            frame_detections = []
-
-            for result in results:
-
-                boxes = result.boxes
-
-                if boxes is None:
-
-                    continue
-
-                for box in boxes:
-
-                    class_id = int(
-                        box.cls[0].item()
-                    )
-
-                    class_name = (
-                        model.names[
-                            class_id
-                        ]
-                    )
-
-                    confidence = float(
-                        box.conf[0].item()
-                    )
-
-                    coordinates = (
-                        box.xyxy[0]
-                        .cpu()
-                        .numpy()
-                        .tolist()
-                    )
-
-                    x1 = float(
-                        coordinates[0]
-                    )
-
-                    y1 = float(
-                        coordinates[1]
-                    )
-
-                    x2 = float(
-                        coordinates[2]
-                    )
-
-                    y2 = float(
-                        coordinates[3]
-                    )
-
-                    detection = {
-
-                        "class_id":
-                            class_id,
-
-                        "class_name":
-                            class_name,
-
-                        "confidence":
-                            round(
-                                confidence,
-                                4
-                            ),
-
-                        "bounding_box": {
-
-                            "x1":
-                                round(
-                                    x1,
-                                    2
-                                ),
-
-                            "y1":
-                                round(
-                                    y1,
-                                    2
-                                ),
-
-                            "x2":
-                                round(
-                                    x2,
-                                    2
-                                ),
-
-                            "y2":
-                                round(
-                                    y2,
-                                    2
-                                )
-                        }
-                    }
-
-                    frame_detections.append(
-                        detection
-                    )
-
-            # ------------------------------------------------
-            # SAVE FRAME DETECTIONS
-            # ------------------------------------------------
-
-            detection_data[
-                "detections"
-            ].append(
-
-                {
-
-                    "frame_number":
-                        frame_number,
-
-                    "timestamp_seconds":
-                        round(
-                            frame_number / fps,
-                            3
-                        ) if fps > 0
-                        else 0,
-
-                    "objects":
-                        frame_detections
-                }
-            )
-
-            # ------------------------------------------------
-            # PROGRESS DISPLAY
-            # ------------------------------------------------
-
-            if (
-                frame_number % 25 == 0
-                or frame_number == total_frames
-            ):
-
-                percentage = (
-
-                    frame_number
-                    / total_frames
-                    * 100
-
-                ) if total_frames > 0 else 0
-
-                print(
-                    f"Processed "
-                    f"{frame_number}/"
-                    f"{total_frames} "
-                    f"frames "
-                    f"({percentage:.1f}%)"
-                )
-
-        cap.release()
-
-        # ----------------------------------------------------
-        # JSON FILE NAME
-        # ----------------------------------------------------
-
-        base_name = os.path.splitext(
-            video_name
-        )[0]
-
-        json_file = os.path.join(
-            OUTPUT_FOLDER,
-            f"{base_name}.json"
-        )
-
-        # ----------------------------------------------------
-        # SAVE JSON
-        # ----------------------------------------------------
-
-        with open(
-            json_file,
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            json.dump(
-                detection_data,
-                file,
-                indent=4
-            )
-
-        print("\n" + "=" * 70)
+    if not cap.isOpened():
 
         print(
-            "              JSON GENERATION COMPLETED"
-        )
-
-        print("=" * 70)
-
-        print(
-            "\nJSON saved to:"
-        )
-
-        print(
-            json_file
-        )
-
-        return json_file
-
-    except Exception as error:
-
-        print(
-            "\nJSON generation failed."
-        )
-
-        print(
-            f"Error: {error}"
+            "\nUnable to open video."
         )
 
         return None
 
-
-# ============================================================
-# VIEW DETECTION JSON
-# ============================================================
-
-def view_detection_json(video_path):
-
-    if video_path is None:
-
-        print(
-            "\nPlease select a video first."
-        )
-
-        return
-
-    video_name = os.path.basename(
-        video_path
+    total_frames = int(
+        cap.get(cv2.CAP_PROP_FRAME_COUNT)
     )
 
+    fps = cap.get(
+        cv2.CAP_PROP_FPS
+    )
+
+    width = int(
+        cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    )
+
+    height = int(
+        cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    )
+
+    if fps <= 0:
+
+        fps = 1.0
+
+    detections = []
+
+    frame_number = 0
+
+    start_time = time.time()
+
+    while True:
+
+        ret, frame = cap.read()
+
+        if not ret:
+
+            break
+
+        frame_number += 1
+
+        timestamp_seconds = (
+            (frame_number - 1) / fps
+        )
+
+        results = model.predict(
+            source=frame,
+            verbose=False
+        )
+
+        objects = []
+
+        for result in results:
+
+            if result.boxes is None:
+
+                continue
+
+            for box in result.boxes:
+
+                class_id = int(
+                    box.cls[0].item()
+                )
+
+                class_name = result.names[
+                    class_id
+                ]
+
+                confidence = float(
+                    box.conf[0].item()
+                )
+
+                coordinates = box.xyxy[
+                    0
+                ].tolist()
+
+                x1 = float(
+                    coordinates[0]
+                )
+
+                y1 = float(
+                    coordinates[1]
+                )
+
+                x2 = float(
+                    coordinates[2]
+                )
+
+                y2 = float(
+                    coordinates[3]
+                )
+
+                objects.append(
+                    {
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "confidence": round(
+                            confidence,
+                            4
+                        ),
+                        "bounding_box": {
+                            "x1": round(
+                                x1,
+                                2
+                            ),
+                            "y1": round(
+                                y1,
+                                2
+                            ),
+                            "x2": round(
+                                x2,
+                                2
+                            ),
+                            "y2": round(
+                                y2,
+                                2
+                            )
+                        }
+                    }
+                )
+
+        detections.append(
+            {
+                "frame_number": frame_number,
+                "timestamp_seconds": round(
+                    timestamp_seconds,
+                    3
+                ),
+                "objects": objects
+            }
+        )
+
+        if frame_number % 50 == 0:
+
+            print(
+                f"Processed {frame_number}/{total_frames} frames..."
+            )
+
+    cap.release()
+
+    elapsed = time.time() - start_time
+
+    detection_json = {
+
+        "video_name": video_filename,
+
+        "video_path": video_path,
+
+        "total_frames": total_frames,
+
+        "fps": round(
+            fps,
+            3
+        ),
+
+        "width": width,
+
+        "height": height,
+
+        "generated_at":
+            datetime.now().isoformat(),
+
+        "detections": detections
+    }
+
     base_name = os.path.splitext(
-        video_name
+        video_filename
     )[0]
 
-    json_file = os.path.join(
-        OUTPUT_FOLDER,
+    json_path = os.path.join(
+        JSON_OUTPUT_DIR,
         f"{base_name}.json"
     )
 
-    if not os.path.exists(
-        json_file
-    ):
+    with open(
+        json_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            detection_json,
+            file,
+            indent=4
+        )
+
+    total_objects = sum(
+        len(frame["objects"])
+        for frame in detections
+    )
+
+    print("\n" + "=" * 70)
+    print("                 JSON GENERATION COMPLETE")
+    print("=" * 70)
+
+    print(
+        f"\nVideo          : {video_filename}"
+    )
+
+    print(
+        f"Total Frames   : {total_frames}"
+    )
+
+    print(
+        f"Total Objects  : {total_objects}"
+    )
+
+    print(
+        f"Processing Time: {elapsed:.2f} seconds"
+    )
+
+    print(
+        f"JSON File      : {json_path}"
+    )
+
+    print("=" * 70)
+
+    return json_path
+
+
+# ============================================================
+# VIEW JSON
+# ============================================================
+
+def view_detection_json():
+
+    if selected_video is None:
+
+        print("\nPlease select a video first.")
+
+        return
+
+    base_name = os.path.splitext(
+        selected_video
+    )[0]
+
+    json_path = os.path.join(
+        JSON_OUTPUT_DIR,
+        f"{base_name}.json"
+    )
+
+    if not os.path.exists(json_path):
 
         print(
-            "\nJSON file not found."
+            "\nDetection JSON not found."
         )
 
         print(
-            "Generate the JSON first "
-            "using option 5."
+            "Generate the JSON first."
         )
 
         return
+
+    with open(
+        json_path,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        data = json.load(file)
+
+    total_objects = sum(
+        len(frame["objects"])
+        for frame in data["detections"]
+    )
+
+    print("\n" + "=" * 70)
+    print("                    DETECTION JSON")
+    print("=" * 70)
+
+    print(
+        f"\nVideo          : {data['video_name']}"
+    )
+
+    print(
+        f"Total Frames   : {data['total_frames']}"
+    )
+
+    print(
+        f"FPS            : {data['fps']}"
+    )
+
+    print(
+        f"Resolution     : {data['width']} x {data['height']}"
+    )
+
+    print(
+        f"Total Objects  : {total_objects}"
+    )
+
+    print(
+        f"\nJSON File:\n{json_path}"
+    )
+
+    print("=" * 70)
+
+    input(
+        "\nPress ENTER to continue..."
+    )
+
+
+# ============================================================
+# SEND JSON TO FASTAPI
+# ============================================================
+
+def send_json_to_fastapi(json_path):
+
+    try:
+
+        import requests
+
+    except ImportError:
+
+        print(
+            "\nThe requests package is not installed."
+        )
+
+        print(
+            "Run: pip install requests"
+        )
+
+        return False
+
+    if not os.path.exists(json_path):
+
+        print(
+            f"\nJSON file not found: {json_path}"
+        )
+
+        return False
 
     try:
 
         with open(
-            json_file,
+            json_path,
             "r",
             encoding="utf-8"
         ) as file:
@@ -936,130 +788,280 @@ def view_detection_json(video_path):
             data = json.load(file)
 
         print("\n" + "=" * 70)
-
-        print(
-            "                  DETECTION JSON"
-        )
-
+        print("                 SENDING JSON TO FASTAPI")
         print("=" * 70)
 
         print(
-            f"\nVideo        : "
-            f"{data['video_name']}"
+            f"\nVideo: {data.get('video_name')}"
         )
 
         print(
-            f"Total Frames : "
-            f"{data['total_frames']}"
+            f"Sending to: {FASTAPI_URL}"
+        )
+
+        response = requests.post(
+            FASTAPI_URL,
+            json=data,
+            timeout=300
         )
 
         print(
-            f"FPS          : "
-            f"{data['fps']:.2f}"
+            f"\nHTTP Status: {response.status_code}"
         )
 
-        print(
-            f"Resolution   : "
-            f"{data['width']} x "
-            f"{data['height']}"
-        )
+        try:
 
-        print(
-            "\nJSON File:"
-        )
+            response_data = response.json()
 
-        print(
-            json_file
-        )
-
-        # ----------------------------------------------------
-        # COUNT OBJECTS
-        # ----------------------------------------------------
-
-        total_objects = 0
-
-        class_counts = {}
-
-        for frame_data in data[
-            "detections"
-        ]:
-
-            for obj in frame_data[
-                "objects"
-            ]:
-
-                total_objects += 1
-
-                class_name = obj[
-                    "class_name"
-                ]
-
-                class_counts[
-                    class_name
-                ] = class_counts.get(
-                    class_name,
-                    0
-                ) + 1
-
-        print(
-            "\nDetection Summary"
-        )
-
-        print(
-            "-" * 70
-        )
-
-        print(
-            f"Total detected objects: "
-            f"{total_objects}"
-        )
-
-        print(
-            "\nObject Counts:"
-        )
-
-        for class_name, count in sorted(
-            class_counts.items()
-        ):
-
-            print(
-                f"  {class_name}: {count}"
-            )
-
-        # ----------------------------------------------------
-        # DISPLAY COMPLETE JSON
-        # ----------------------------------------------------
-
-        show_full = input(
-            "\nDisplay complete JSON? (y/n): "
-        ).strip().lower()
-
-        if show_full == "y":
-
-            print(
-                "\n" + "=" * 70
-            )
+            print("\nFastAPI Response:")
 
             print(
                 json.dumps(
-                    data,
+                    response_data,
                     indent=4
                 )
             )
 
+        except ValueError:
+
             print(
-                "=" * 70
+                "\nFastAPI Response:"
             )
+
+            print(
+                response.text
+            )
+
+        if response.status_code == 200:
+
+            print(
+                "\nJSON successfully processed by FastAPI."
+            )
+
+            return True
+
+        print(
+            "\nFastAPI rejected the JSON."
+        )
+
+        return False
+
+    except requests.exceptions.ConnectionError:
+
+        print(
+            "\nUnable to connect to FastAPI."
+        )
+
+        print(
+            "Make sure FastAPI is running."
+        )
+
+        return False
+
+    except requests.exceptions.Timeout:
+
+        print(
+            "\nFastAPI request timed out."
+        )
+
+        return False
 
     except Exception as error:
 
         print(
-            "\nUnable to read JSON."
+            f"\nError while sending JSON:\n{error}"
         )
 
+        return False
+
+
+# ============================================================
+# PROCESS ONE VIDEO COMPLETELY
+# ============================================================
+
+def process_single_video(video_filename):
+
+    video_path = os.path.join(
+        VIDEOS_DIR,
+        video_filename
+    )
+
+    print("\n\n" + "=" * 80)
+    print(
+        f"             PROCESSING VIDEO: {video_filename}"
+    )
+    print("=" * 80)
+
+    # Step 1: YOLO detection
+    detection_result = run_yolo_detection(
+        video_path
+    )
+
+    if detection_result is None:
+
         print(
-            f"Error: {error}"
+            f"\nSkipping {video_filename} because YOLO failed."
         )
+
+        return False
+
+    # Step 2: Generate JSON
+    json_path = generate_detection_json(
+        video_path
+    )
+
+    if json_path is None:
+
+        print(
+            f"\nSkipping {video_filename} because JSON generation failed."
+        )
+
+        return False
+
+    # Step 3: Send JSON to FastAPI
+    success = send_json_to_fastapi(
+        json_path
+    )
+
+    if success:
+
+        print("\n" + "=" * 80)
+        print(
+            f"        COMPLETED: {video_filename}"
+        )
+        print("=" * 80)
+
+        return True
+
+    print("\n" + "=" * 80)
+    print(
+        f"        FAILED TO SEND: {video_filename}"
+    )
+    print("=" * 80)
+
+    return False
+
+
+# ============================================================
+# PROCESS ALL VIDEOS
+# ============================================================
+
+def process_all_videos():
+
+    videos = get_video_files()
+
+    if not videos:
+
+        print(
+            "\nNo videos found in videos folder."
+        )
+
+        return
+
+    print("\n" + "=" * 80)
+    print("                 PROCESSING ALL VIDEOS")
+    print("=" * 80)
+
+    print(
+        f"\nTotal Videos Found: {len(videos)}"
+    )
+
+    print("\nVideos:")
+
+    for index, video in enumerate(
+        videos,
+        start=1
+    ):
+
+        print(
+            f"{index}. {video}"
+        )
+
+    print("\n" + "=" * 80)
+
+    confirmation = input(
+        "\nStart processing all videos? (y/n): "
+    ).strip().lower()
+
+    if confirmation != "y":
+
+        print(
+            "\nProcessing cancelled."
+        )
+
+        return
+
+    overall_start = time.time()
+
+    successful = []
+    failed = []
+
+    for index, video in enumerate(
+        videos,
+        start=1
+    ):
+
+        print(
+            f"\n\nVIDEO {index}/{len(videos)}"
+        )
+
+        success = process_single_video(
+            video
+        )
+
+        if success:
+
+            successful.append(video)
+
+        else:
+
+            failed.append(video)
+
+    overall_elapsed = (
+        time.time() - overall_start
+    )
+
+    print("\n\n" + "=" * 80)
+    print("                 ALL VIDEO PROCESSING COMPLETE")
+    print("=" * 80)
+
+    print(
+        f"\nTotal Videos : {len(videos)}"
+    )
+
+    print(
+        f"Successful   : {len(successful)}"
+    )
+
+    print(
+        f"Failed       : {len(failed)}"
+    )
+
+    print(
+        f"Total Time   : {overall_elapsed:.2f} seconds"
+    )
+
+    if successful:
+
+        print("\nSuccessful Videos:")
+
+        for video in successful:
+
+            print(
+                f"  ✓ {video}"
+            )
+
+    if failed:
+
+        print("\nFailed Videos:")
+
+        for video in failed:
+
+            print(
+                f"  ✗ {video}"
+            )
+
+    print("=" * 80)
 
 
 # ============================================================
@@ -1068,19 +1070,18 @@ def view_detection_json(video_path):
 
 def main():
 
-    selected_video = None
+    global selected_video
 
     while True:
 
-        display_title()
+        print("\n" + "=" * 70)
+        print("                 YOLO VIDEO DETECTION SYSTEM")
+        print("=" * 70)
 
         if selected_video:
 
             print(
-                "Selected Video : "
-                + os.path.basename(
-                    selected_video
-                )
+                f"Selected Video : {selected_video}"
             )
 
         else:
@@ -1089,132 +1090,76 @@ def main():
                 "Selected Video : None"
             )
 
-        print(
-            "\n1. Select Video"
-        )
+        print("\n1. Select Video")
+        print("2. View Original Video")
+        print("3. Run YOLO Detection")
+        print("4. View Detection Output")
+        print("5. Generate Detection JSON")
+        print("6. View Detection JSON")
+        print("7. Process ALL Videos")
+        print("8. Exit")
 
-        print(
-            "2. View Original Video"
-        )
-
-        print(
-            "3. Run YOLO Detection"
-        )
-
-        print(
-            "4. View Detection Output"
-        )
-
-        print(
-            "5. Generate Detection JSON"
-        )
-
-        print(
-            "6. View Detection JSON"
-        )
-
-        print(
-            "7. Exit"
-        )
-
-        print(
-            "-" * 70
-        )
+        print("=" * 70)
 
         choice = input(
             "Enter your choice: "
         ).strip()
 
-        # ====================================================
-        # OPTION 1
-        # ====================================================
-
         if choice == "1":
 
-            selected_video = select_video()
-
-        # ====================================================
-        # OPTION 2
-        # ====================================================
+            select_video()
 
         elif choice == "2":
 
-            view_video(
-                selected_video,
-                "Original Video"
-            )
-
-        # ====================================================
-        # OPTION 3
-        # ====================================================
+            view_original_video()
 
         elif choice == "3":
 
-            run_yolo_detection(
-                selected_video
-            )
+            video_path = get_selected_video_path()
 
-        # ====================================================
-        # OPTION 4
-        # ====================================================
+            if video_path:
+
+                run_yolo_detection(
+                    video_path
+                )
 
         elif choice == "4":
 
             view_detection_output()
 
-        # ====================================================
-        # OPTION 5
-        # ====================================================
-
         elif choice == "5":
 
-            generate_detection_json(
-                selected_video
-            )
+            video_path = get_selected_video_path()
 
-        # ====================================================
-        # OPTION 6
-        # ====================================================
+            if video_path:
+
+                generate_detection_json(
+                    video_path
+                )
 
         elif choice == "6":
 
-            view_detection_json(
-                selected_video
-            )
-
-        # ====================================================
-        # OPTION 7
-        # ====================================================
+            view_detection_json()
 
         elif choice == "7":
 
-            print(
-                "\nExiting YOLO Video Detection System..."
-            )
+            process_all_videos()
 
-            print(
-                "Thank you!"
-            )
+        elif choice == "8":
+
+            print("\nThank you!")
 
             break
-
-        # ====================================================
-        # INVALID OPTION
-        # ====================================================
 
         else:
 
             print(
-                "\nInvalid choice."
+                "\nInvalid choice. Please select 1-8."
             )
-
-        input(
-            "\nPress ENTER to continue..."
-        )
 
 
 # ============================================================
-# PROGRAM ENTRY POINT
+# PROGRAM START
 # ============================================================
 
 if __name__ == "__main__":

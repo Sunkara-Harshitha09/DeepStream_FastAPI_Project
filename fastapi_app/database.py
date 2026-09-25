@@ -1,8 +1,11 @@
 import os
+from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+load_dotenv()
 
+# PostgreSQL configuration
 # PostgreSQL configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")

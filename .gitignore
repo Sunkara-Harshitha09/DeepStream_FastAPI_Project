@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -12,6 +12,14 @@ env/
 # YOLO generated files
 runs/
 yolo11n.pt
+yolo11n-pose.pt
+
+# Generated video files
+videos/*.mp4
+
+# Generated detection/tracking output
+person_detection_output/
+person_tracking_output/
 
 # IDE
 .vscode/
